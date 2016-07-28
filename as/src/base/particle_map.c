@@ -1734,8 +1734,8 @@ packed_map_increment(as_bin *b, rollback_alloc *alloc_buf, const cdt_payload *ke
 		return -AS_PROTO_RESULT_FAIL_PARAMETER;
 	}
 
-	int64_t incr_int;
-	double incr_double;
+	int64_t incr_int = 0;
+	double incr_double = 0;
 	as_val_t delta_value_type;
 
 	if (delta_value) {
