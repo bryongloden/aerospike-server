@@ -153,6 +153,8 @@ static int file_write(char * filename, uint8_t * content, size_t content_len, un
 	int r = fwrite(content, sizeof(char), content_len, file);
 	if (r <= 0) {
 		cf_info(AS_UDF, "could not write file %s %d", filepath, r);
+		fclose(file);
+		file = NULL;
 		return -1;
 	}
 
