@@ -1393,6 +1393,10 @@ cfg_strdup_one_of(const cfg_line* p_line, const char* toks[], int num_toks)
 
 	char valid_toks[valid_toks_size];
 
+	for (int i = 0; i < valid_toks_size; i++) {
+		valid_toks[i] = NULL;
+	}
+	
 	for (int i = 0; i < num_toks; i++) {
 		strcat(valid_toks, toks[i]);
 		strcat(valid_toks, ", ");
