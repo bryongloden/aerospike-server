@@ -213,7 +213,7 @@ as_write_start(as_transaction* tr)
 	// If there are duplicates to resolve, start doing so.
 	if (tr->rsv.n_dupl != 0) {
 		if (! start_write_dup_res(rw, tr)) {
-			rw_request_hash_delete(&hkey);
+			rw_request_hash_delete(&hkey, rw);
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 			send_write_response(tr, NULL);
 			return TRANS_DONE_ERROR;
@@ -230,7 +230,7 @@ as_write_start(as_transaction* tr)
 
 	// If error, transaction is finished.
 	if (status != TRANS_IN_PROGRESS) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		send_write_response(tr, NULL);
 		return status;
 	}
@@ -243,12 +243,12 @@ as_write_start(as_transaction* tr)
 	// TODO - consider a single-node fast path bypassing hash and pickling?
 	if (rw->n_dest_nodes == 0) {
 		send_write_response(tr, &rw->response_db);
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		return TRANS_DONE_SUCCESS;
 	}
 
 	if (! start_write_repl_write(rw, tr)) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		send_write_response(tr, NULL);
 		return TRANS_DONE_ERROR;
@@ -297,8 +297,8 @@ start_write_repl_write(rw_request* rw, as_transaction* tr)
 	rw->respond_client_on_master_completion = respond_on_master_complete(tr);
 
 	if (rw->respond_client_on_master_completion) {
-		// Don't wait for replication. When replication is complete, we will
-		// call send_write_response() again, but it will no-op quietly.
+		// Don't wait for replication. When replication is complete, we won't
+		// call send_write_response() again.
 		send_write_response(tr, &rw->response_db);
 	}
 
@@ -326,7 +326,7 @@ write_dup_res_cb(rw_request* rw)
 	BENCHMARK_NEXT_DATA_POINT((&tr), write, master);
 
 	if (status == TRANS_DONE_ERROR) {
-		send_write_response(&tr, &rw->response_db);
+		send_write_response(&tr, NULL);
 		return true;
 	}
 
@@ -362,8 +362,8 @@ write_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 	}
 
 	if (rw->respond_client_on_master_completion) {
-		// Don't wait for replication. When replication is complete, we will
-		// call send_write_response() again, but it will no-op quietly.
+		// Don't wait for replication. When replication is complete, we won't
+		// call send_write_response() again.
 		send_write_response(tr, &rw->response_db);
 	}
 
@@ -401,6 +401,9 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		return;
 	}
 
+	// Note - if tr was setup from rw, rw->from.any has been set null and
+	// informs timeout it lost the race.
+
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		if (db && db->used_sz != 0) {
@@ -437,7 +440,7 @@ send_write_response(as_transaction* tr, cf_dyn_buf* db)
 		break;
 	}
 
-	tr->from.any = NULL; // inform timeout it lost the race
+	tr->from.any = NULL; // needed only for respond-on-master-complete
 }
 
 
@@ -453,7 +456,7 @@ write_timeout_cb(rw_request* rw)
 		as_end_of_transaction_force_close(rw->from.proto_fd_h);
 		// Timeouts aren't included in histograms.
 		client_write_update_stats(rw->rsv.ns, AS_PROTO_RESULT_FAIL_TIMEOUT,
-				as_msg_is_xdr(&rw->msgp->msg));
+				rw->msgp ? as_msg_is_xdr(&rw->msgp->msg) : false);
 		break;
 	case FROM_PROXY:
 		break;
@@ -467,8 +470,7 @@ write_timeout_cb(rw_request* rw)
 		break;
 	}
 
-	// Paranoia - shouldn't need this to inform other callback it lost race.
-	rw->from.any = NULL;
+	rw->from.any = NULL; // inform other callback it lost the race
 }
 
 
@@ -693,7 +695,7 @@ write_master(rw_request* rw, as_transaction* tr)
 	// If we ended up with no bins, delete the record.
 	if (is_delete) {
 		as_index_delete(tree, &tr->keyd);
-		// TODO - maybe this needs a special counter?
+		cf_atomic64_incr(&ns->n_deleted_last_bin);
 	}
 	// Or (normally) adjust max void-times.
 	else if (r->void_time != 0) {

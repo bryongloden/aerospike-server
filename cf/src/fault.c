@@ -75,6 +75,7 @@ char *cf_fault_context_strings[] = {
 		"fabric",
 		"geo",
 		"hb",
+		"hlc",
 		"index",
 		"info",
 		"info-port",
@@ -832,14 +833,22 @@ cf_fault_event_nostack(const cf_fault_context context,
 	char mbuf[1024];
 	time_t now;
 	struct tm nowtm;
+	size_t pos;
 
 	/* Make sure there's always enough space for the \n\0. */
 	size_t limit = sizeof(mbuf) - 2;
 
 	/* Set the timestamp */
 	now = time(NULL);
-	gmtime_r(&now, &nowtm);
-	size_t pos = strftime(mbuf, limit, "%b %d %Y %T %Z: ", &nowtm);
+
+	if (g_use_local_time) {
+		localtime_r(&now, &nowtm);
+		pos = strftime(mbuf, limit, "%b %d %Y %T GMT%z: ", &nowtm);
+	}
+	else {
+		gmtime_r(&now, &nowtm);
+		pos = strftime(mbuf, limit, "%b %d %Y %T %Z: ", &nowtm);
+	}
 
 	/* Set the context/scope/severity tag */
 	pos += snprintf(mbuf + pos, limit - pos, "%s (%s): ", cf_fault_severity_strings[severity], cf_fault_context_strings[context]);

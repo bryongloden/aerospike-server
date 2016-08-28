@@ -114,14 +114,9 @@ const bool g_xdr_supported;
 
 void xdr_config_defaults(xdr_config *c)
 {
-	int index;
-
 	c->xdr_global_enabled = false;		// This config option overrides the enable-xdr setting of the namespace(s)
 
-	for (index = 0; index < XDR_MAX_DGLOG_FILES ; index++) {
-		c->xdr_digestlog_path[index] = NULL;	// Path where the digest information is written to the disk
-	}
-	c->xdr_num_digestlog_paths = 0;		// Number of rlog files 0 is default
+	c->xdr_digestlog_path = NULL;	// Path where the digest information is written to the disk
 	c->xdr_digestlog_overwrite = true;
 	c->xdr_digestlog_persist = true;
 	c->xdr_info_port = 0;

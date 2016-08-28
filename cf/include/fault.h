@@ -83,6 +83,7 @@ typedef enum {
 	AS_FABRIC,
 	AS_GEO,
 	AS_HB,
+	AS_HLC,
 	AS_INDEX,
 	AS_INFO,
 	AS_INFO_PORT,

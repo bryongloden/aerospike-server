@@ -110,6 +110,7 @@
 #include "base/stats.h"
 #include "base/system_metadata.h"
 #include "base/thr_sindex.h"
+#include "base/thr_info.h"
 #include "geospatial/geospatial.h"
 #include "transaction/udf.h"
 
@@ -1398,8 +1399,6 @@ as_sindex_histogram_enable(as_namespace *ns, char * iname, bool enable)
 	AS_SINDEX_RELEASE(si);
 	return AS_SINDEX_OK;
 }
-
-extern int as_info_parameter_get(char *param_str, char *param, char *value, int  *value_len);
 
 /*
  * Client API function to set configuration parameters for secondary indexes
@@ -4689,12 +4688,12 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 	}
 
 	as_sindex_metadata imd;
-	memset((void *)&imd, 0, sizeof(imd));
 	char         * params = NULL;
 	as_namespace * ns     = NULL;
-	imd.post_op = 0;
 
 	for (int i = 0; i < items->num_items; i++) {
+		memset((void *)&imd, 0, sizeof(imd));
+
 		params = items->item[i]->value;
 		switch (items->item[i]->action) {
 			// TODO: Better handling of failure of the action items list
@@ -4766,6 +4765,8 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 				break;
 			}
 		}
+
+		as_sindex_imd_free(&imd);
 	}
 
 	// Check if the incoming operation is merge. If it's merge
@@ -4820,8 +4821,6 @@ as_sindex_smd_accept_cb(char *module, as_smd_item_list_t *items, void *udata, ui
 			}
 		}
 	}
-
-	as_sindex_imd_free(&imd);
 
 	return(0);
 }

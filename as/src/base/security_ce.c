@@ -29,11 +29,11 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/socket.h>
 
 #include "citrusleaf/alloc.h"
 
 #include "fault.h"
+#include "socket.h"
 
 #include "base/proto.h"
 #include "base/transaction.h"
@@ -127,16 +127,16 @@ as_security_transact(as_transaction* tr)
 	// Send the complete response.
 	uint8_t* p_write = resp;
 	uint8_t* p_end = resp + resp_size;
-	int fd = tr->from.proto_fd_h->fd;
+	cf_socket *sock = tr->from.proto_fd_h->sock;
 
 	while (p_write < p_end) {
-		int rv = send(fd, (void*)p_write, p_end - p_write, MSG_NOSIGNAL);
+		int rv = cf_socket_send(sock, (void*)p_write, p_end - p_write, MSG_NOSIGNAL);
 
 		if (rv > 0) {
 			p_write += rv;
 		}
 		else if (rv == 0) {
-			cf_warning(AS_SECURITY, "fd %d send returned 0", fd);
+			cf_warning(AS_SECURITY, "fd %d send returned 0", CSFD(sock));
 			as_end_of_transaction_force_close(tr->from.proto_fd_h);
 			tr->from.proto_fd_h = NULL;
 			return;
@@ -146,7 +146,7 @@ as_security_transact(as_transaction* tr)
 			usleep(1);
 		}
 		else {
-			cf_warning(AS_SECURITY, "fd %d send failed, errno %d", fd, errno);
+			cf_warning(AS_SECURITY, "fd %d send failed, errno %d", CSFD(sock), errno);
 			as_end_of_transaction_force_close(tr->from.proto_fd_h);
 			tr->from.proto_fd_h = NULL;
 			return;

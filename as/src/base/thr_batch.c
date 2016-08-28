@@ -29,7 +29,6 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/socket.h>
 
 #include "aerospike/as_thread_pool.h"
 #include "citrusleaf/alloc.h"
@@ -41,6 +40,7 @@
 #include "dynbuf.h"
 #include "hist.h"
 #include "util.h"
+#include "socket.h"
 
 #include "base/cfg.h"
 #include "base/datamodel.h"
@@ -173,19 +173,19 @@ batch_build_response(batch_transaction* btr, cf_buf_builder** bb_r)
 
 // Send response to client socket.
 static int
-batch_send(int fd, uint8_t* buf, size_t len, int flags)
+batch_send(cf_socket *sock, uint8_t* buf, size_t len, int flags)
 {
 	int rv;
 	int pos = 0;
 
 	while (pos < len) {
-		rv = send(fd, buf + pos, len - pos, flags);
+		rv = cf_socket_send(sock, buf + pos, len - pos, flags);
 
 		if (rv <= 0) {
 			if (errno != EAGAIN) {
 				// This error may occur frequently if client is timing out transactions.
 				// Therefore, use debug level.
-				cf_debug(AS_BATCH, "batch send response error returned %d errno %d fd %d", rv, errno, fd);
+				cf_debug(AS_BATCH, "batch send response error returned %d errno %d fd %d", rv, errno, CSFD(sock));
 				return -1;
 			}
 		}
@@ -199,7 +199,7 @@ batch_send(int fd, uint8_t* buf, size_t len, int flags)
 
 // Send protocol header to the requesting client.
 static int
-batch_send_header(int fd, size_t len)
+batch_send_header(cf_socket *sock, size_t len)
 {
 	as_proto proto;
 	proto.version = PROTO_VERSION;
@@ -207,12 +207,12 @@ batch_send_header(int fd, size_t len)
 	proto.sz = len;
 	as_proto_swap(&proto);
 
-	return batch_send(fd, (uint8_t*) &proto, 8, MSG_NOSIGNAL | MSG_MORE);
+	return batch_send(sock, (uint8_t*) &proto, 8, MSG_NOSIGNAL | MSG_MORE);
 }
 
 // Send protocol trailer to the requesting client.
 static int
-batch_send_final(int fd, uint32_t result_code)
+batch_send_final(cf_socket *sock, uint32_t result_code)
 {
 	cl_msg m;
 	m.proto.version = PROTO_VERSION;
@@ -232,7 +232,7 @@ batch_send_final(int fd, uint32_t result_code)
 	m.msg.n_ops = 0;
 	as_msg_swap_header(&m.msg);
 
-	return batch_send(fd, (uint8_t*) &m, sizeof(m), MSG_NOSIGNAL);
+	return batch_send(sock, (uint8_t*) &m, sizeof(m), MSG_NOSIGNAL);
 }
 
 
@@ -266,24 +266,24 @@ batch_process_request(batch_transaction* btr)
 	cf_buf_builder* bb = 0;
 	batch_build_response(btr, &bb);
 
-	int fd = btr->fd_h->fd;
+	cf_socket *sock = btr->fd_h->sock;
 	int brv;
 
 	if (bb) {
-		brv = batch_send_header(fd, bb->used_sz);
+		brv = batch_send_header(sock, bb->used_sz);
 
 		if (brv == 0) {
-			brv = batch_send(fd, bb->buf, bb->used_sz, MSG_NOSIGNAL | MSG_MORE);
+			brv = batch_send(sock, bb->buf, bb->used_sz, MSG_NOSIGNAL | MSG_MORE);
 
 			if (brv == 0) {
-				brv = batch_send_final(fd, 0);
+				brv = batch_send_final(sock, 0);
 			}
 		}
 		cf_buf_builder_free(bb);
 	}
 	else {
 		cf_info(AS_BATCH, " batch request: returned no local responses");
-		brv = batch_send_final(fd, 0);
+		brv = batch_send_final(sock, 0);
 	}
 
 	batch_transaction_done(btr, brv != 0);

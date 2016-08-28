@@ -481,7 +481,7 @@ main(int argc, char **argv)
 	as_udf_init();				// user-defined functions
 	as_scan_init();				// scan a namespace or set
 	as_batch_init();			// batch transaction handling
-	as_batch_direct_init();		// low priority transaction handling        
+	as_batch_direct_init();		// low priority transaction handling
 	as_xdr_init();				// cross data-center replication
 	as_mon_init();				// monitor
 

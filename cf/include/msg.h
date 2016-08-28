@@ -51,11 +51,11 @@ typedef enum msg_field_type_t {
 
 typedef enum msg_type_t {
 	M_TYPE_FABRIC = 0,
-	M_TYPE_HEARTBEAT = 1,
+	M_TYPE_HEARTBEAT_V2 = 1,
 	M_TYPE_PAXOS = 2,
 	M_TYPE_MIGRATE = 3,
 	M_TYPE_PROXY = 4,
-	M_TYPE_UNUSED_5 = 5,
+	M_TYPE_HEARTBEAT = 5,
 	M_TYPE_UNUSED_6 = 6,
 	M_TYPE_RW = 7,
 	M_TYPE_INFO = 8,
@@ -176,6 +176,10 @@ void msg_decr_ref(msg *m);
 //
 
 uint32_t msg_get_wire_size(const msg *m);
+// Get the fixed wire size of input templates.
+// mt - pointer to the templates.
+// mt_len - number of templates.
+int msg_get_template_fixed_sz(const msg_template* mt, const size_t mt_len);
 
 int msg_fillbuf(const msg *m, uint8_t *buf, size_t *buflen);
 
@@ -193,7 +197,6 @@ void msg_preserve_all_fields(msg *m);
 //------------------------------------------------
 // Set fields in messages.
 //
-
 int msg_set_uint32(msg *m, int field_id, uint32_t v);
 int msg_set_int32(msg *m, int field_id, int32_t v);
 int msg_set_uint64(msg *m, int field_id, uint64_t v);
@@ -213,7 +216,7 @@ int msg_set_buf_array(msg *m, int field_id, int index, const uint8_t *v, size_t 
 //------------------------------------------------
 // Get fields from messages.
 //
-
+bool msg_is_set(const msg *m, int field_id);
 int msg_get_uint32(const msg *m, int field_id, uint32_t *r);
 int msg_get_int32(const msg *m, int field_id, int32_t *r);
 int msg_get_uint64(const msg *m, int field_id, uint64_t *r);

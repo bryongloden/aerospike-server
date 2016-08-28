@@ -1,7 +1,7 @@
 /*
  * cfg.c
  *
- * Copyright (C) 2008-2014 Aerospike, Inc.
+ * Copyright (C) 2008-2016 Aerospike, Inc.
  *
  * Portions may be licensed to Aerospike, Inc. under one or more contributor
  * license agreements.
@@ -49,6 +49,7 @@
 #include "hist_track.h"
 #include "msg.h"
 #include "olock.h"
+#include "socket.h"
 #include "util.h"
 
 #include "base/cluster_config.h"
@@ -123,6 +124,7 @@ cfg_set_defaults()
 	c->batch_max_unused_buffers = 256; // maximum number of buffers allowed in batch buffer pool
 	c->batch_priority = 200; // # of rows between a quick context switch?
 	c->n_batch_index_threads = 4;
+	c->clock_skew_max_ms = 1000;
 	c->n_fabric_workers = 16;
 	c->hist_track_back = 300;
 	c->hist_track_slice = 10;
@@ -137,7 +139,7 @@ cfg_set_defaults()
 	c->paxos_max_cluster_size = AS_CLUSTER_DEFAULT_SZ; // default the maximum cluster size to a "reasonable" value
 	c->paxos_protocol = AS_PAXOS_PROTOCOL_V3; // default to 3.0 "sindex" paxos protocol version
 	c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER; // default to auto reset master
-	c->paxos_retransmit_period = 3; // run paxos retransmit once every 3 seconds
+	c->paxos_retransmit_period = 5; // run paxos retransmit once every 5 seconds
 	c->proto_fd_idle_ms = 60000; // 1 minute reaping of proto file descriptors
 	c->proto_slow_netio_sleep_ms = 1; // 1 ms sleep between retry for slow queries
 	c->run_as_daemon = true; // set false only to run in debugger & see console output
@@ -159,26 +161,28 @@ cfg_set_defaults()
 	c->asmalloc_enabled = true;
 
 	// Network service defaults.
-	c->socket.proto = SOCK_STREAM; // not configurable, but addr and port are
-	c->localhost_socket.proto = SOCK_STREAM; // not configurable
-	c->xdr_socket.proto = SOCK_STREAM;
+	c->socket.type = SOCK_STREAM; // not configurable, but addr and port are
+	c->localhost_socket.type = SOCK_STREAM; // not configurable
+	c->xdr_socket.type = SOCK_STREAM;
 	c->socket.addr = (char*)IPV4_ANY_ADDR; // by default listen on any IPv4 address
 	c->xdr_socket.addr = (char*)IPV4_ANY_ADDR;
 	c->socket_reuse_addr = true;
 	c->xdr_socket.reuse_addr = true;
+
+	// Network heartbeat defaults.
+	c->hb_config.hb_mode = AS_HB_MODE_UNDEF;
+	c->hb_config.hb_tx_interval = 150;
+	c->hb_config.hb_max_intervals_missed = 10;
+	c->hb_config.hb_fabric_grace_factor = -1; // Inifinite fabric grace period.
+	c->hb_config.hb_mesh_rw_retry_timeout = 500;
+	c->hb_config.hb_protocol = AS_HB_PROTOCOL_V2;
+	c->hb_config.override_mtu = 0;
 
 	// Fabric TCP socket keepalive defaults.
 	c->fabric_keepalive_enabled = true;
 	c->fabric_keepalive_time = 1; // seconds
 	c->fabric_keepalive_intvl = 1; // seconds
 	c->fabric_keepalive_probes = 10; // tries
-
-	// Network heartbeat defaults.
-	c->hb_mode = AS_HB_MODE_UNDEF; // must supply heartbeat mode in the configuration file
-	c->hb_interval = 150;
-	c->hb_timeout = 10;
-	c->hb_mesh_rw_retry_timeout = 500;
-	c->hb_protocol = AS_HB_PROTOCOL_V2; // default to the latest heartbeat protocol version
 
 	// XDR defaults.
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
@@ -260,6 +264,8 @@ typedef enum {
 	CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS,
 	CASE_SERVICE_BATCH_PRIORITY,
 	CASE_SERVICE_BATCH_INDEX_THREADS,
+	CASE_SERVICE_CLOCK_SKEW_MAX_MS,
+	CASE_SERVICE_CLUSTER_ID,
 	CASE_SERVICE_ENABLE_BENCHMARKS_SVC,
 	CASE_SERVICE_ENABLE_HIST_INFO,
 	CASE_SERVICE_FABRIC_WORKERS,
@@ -304,7 +310,6 @@ typedef enum {
 	CASE_SERVICE_SCAN_THREADS,
 	CASE_SERVICE_SINDEX_BUILDER_THREADS,
 	CASE_SERVICE_SINDEX_DATA_MAX_MEMORY,
-	CASE_SERVICE_SNUB_NODES,
 	CASE_SERVICE_TICKER_INTERVAL,
 	CASE_SERVICE_TRANSACTION_MAX_MS,
 	CASE_SERVICE_TRANSACTION_PENDING_LIMIT,
@@ -413,15 +418,15 @@ typedef enum {
 	CASE_NETWORK_HEARTBEAT_MODE,
 	CASE_NETWORK_HEARTBEAT_ADDRESS,
 	CASE_NETWORK_HEARTBEAT_PORT,
-	CASE_NETWORK_HEARTBEAT_MESH_ADDRESS,
-	CASE_NETWORK_HEARTBEAT_MESH_PORT,
 	CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT,
 	CASE_NETWORK_HEARTBEAT_INTERVAL,
 	CASE_NETWORK_HEARTBEAT_TIMEOUT,
 	// Normally hidden:
+	CASE_NETWORK_HEARTBEAT_FABRIC_GRACE_FACTOR,
 	CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS,
 	CASE_NETWORK_HEARTBEAT_MCAST_TTL,
 	CASE_NETWORK_HEARTBEAT_MESH_RW_RETRY_TIMEOUT,
+	CASE_NETWORK_HEARTBEAT_MTU,
 	CASE_NETWORK_HEARTBEAT_PROTOCOL,
 
 	// Network heartbeat mode options (value tokens):
@@ -432,6 +437,7 @@ typedef enum {
 	CASE_NETWORK_HEARTBEAT_PROTOCOL_RESET,
 	CASE_NETWORK_HEARTBEAT_PROTOCOL_V1,
 	CASE_NETWORK_HEARTBEAT_PROTOCOL_V2,
+	CASE_NETWORK_HEARTBEAT_PROTOCOL_V3,
 
 	// Network fabric options:
 	// Normally visible, in canonical configuration file order:
@@ -442,6 +448,7 @@ typedef enum {
 	CASE_NETWORK_FABRIC_KEEPALIVE_TIME,
 	CASE_NETWORK_FABRIC_KEEPALIVE_INTVL,
 	CASE_NETWORK_FABRIC_KEEPALIVE_PROBES,
+	CASE_NETWORK_FABRIC_LATENCY_MAX_MS,
 
 	// Network info options:
 	// Normally visible, in canonical configuration file order:
@@ -674,6 +681,8 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "batch-max-unused-buffers",		CASE_SERVICE_BATCH_MAX_UNUSED_BUFFERS },
 		{ "batch-priority",					CASE_SERVICE_BATCH_PRIORITY },
 		{ "batch-index-threads",			CASE_SERVICE_BATCH_INDEX_THREADS },
+		{ "clock-skew-max-ms",				CASE_SERVICE_CLOCK_SKEW_MAX_MS },
+		{ "cluster-id",						CASE_SERVICE_CLUSTER_ID },
 		{ "enable-benchmarks-svc",			CASE_SERVICE_ENABLE_BENCHMARKS_SVC },
 		{ "enable-hist-info",				CASE_SERVICE_ENABLE_HIST_INFO },
 		{ "fabric-workers",					CASE_SERVICE_FABRIC_WORKERS },
@@ -718,7 +727,6 @@ const cfg_opt SERVICE_OPTS[] = {
 		{ "scan-threads",					CASE_SERVICE_SCAN_THREADS },
 		{ "sindex-builder-threads",			CASE_SERVICE_SINDEX_BUILDER_THREADS },
 		{ "sindex-data-max-memory",			CASE_SERVICE_SINDEX_DATA_MAX_MEMORY },
-		{ "snub-nodes",						CASE_SERVICE_SNUB_NODES },
 		{ "ticker-interval",				CASE_SERVICE_TICKER_INTERVAL },
 		{ "transaction-max-ms",				CASE_SERVICE_TRANSACTION_MAX_MS },
 		{ "transaction-pending-limit",		CASE_SERVICE_TRANSACTION_PENDING_LIMIT },
@@ -782,10 +790,7 @@ const cfg_opt SERVICE_PAXOS_PROTOCOL_OPTS[] = {
 };
 
 const cfg_opt SERVICE_PAXOS_RECOVERY_OPTS[] = {
-		{ "auto-dun-all",					CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_ALL },
-		{ "auto-dun-master",				CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_MASTER },
-		{ "auto-reset-master",				CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER },
-		{ "manual",							CASE_SERVICE_PAXOS_RECOVERY_MANUAL }
+		{ "auto-reset-master",				CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER }
 };
 
 const cfg_opt LOGGING_OPTS[] = {
@@ -829,14 +834,14 @@ const cfg_opt NETWORK_HEARTBEAT_OPTS[] = {
 		{ "mode",							CASE_NETWORK_HEARTBEAT_MODE },
 		{ "address",						CASE_NETWORK_HEARTBEAT_ADDRESS },
 		{ "port",							CASE_NETWORK_HEARTBEAT_PORT },
-		{ "mesh-address",					CASE_NETWORK_HEARTBEAT_MESH_ADDRESS },
-		{ "mesh-port",						CASE_NETWORK_HEARTBEAT_MESH_PORT },
 		{ "mesh-seed-address-port",			CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT },
 		{ "interval",						CASE_NETWORK_HEARTBEAT_INTERVAL },
 		{ "timeout",						CASE_NETWORK_HEARTBEAT_TIMEOUT },
+		{ "fabric-grace-factor",			CASE_NETWORK_HEARTBEAT_FABRIC_GRACE_FACTOR },
 		{ "interface-address",				CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS },
 		{ "mcast-ttl",						CASE_NETWORK_HEARTBEAT_MCAST_TTL },
 		{ "mesh-rw-retry-timeout",			CASE_NETWORK_HEARTBEAT_MESH_RW_RETRY_TIMEOUT },
+		{ "mtu",							CASE_NETWORK_HEARTBEAT_MTU },
 		{ "protocol",						CASE_NETWORK_HEARTBEAT_PROTOCOL },
 		{ "}",								CASE_CONTEXT_END }
 };
@@ -849,7 +854,8 @@ const cfg_opt NETWORK_HEARTBEAT_MODE_OPTS[] = {
 const cfg_opt NETWORK_HEARTBEAT_PROTOCOL_OPTS[] = {
 		{ "reset",							CASE_NETWORK_HEARTBEAT_PROTOCOL_RESET },
 		{ "v1",								CASE_NETWORK_HEARTBEAT_PROTOCOL_V1 },
-		{ "v2",								CASE_NETWORK_HEARTBEAT_PROTOCOL_V2 }
+		{ "v2",								CASE_NETWORK_HEARTBEAT_PROTOCOL_V2 },
+		{ "v3",								CASE_NETWORK_HEARTBEAT_PROTOCOL_V3}
 };
 
 const cfg_opt NETWORK_FABRIC_OPTS[] = {
@@ -859,6 +865,7 @@ const cfg_opt NETWORK_FABRIC_OPTS[] = {
 		{ "keepalive-time",					CASE_NETWORK_FABRIC_KEEPALIVE_TIME },
 		{ "keepalive-intvl",				CASE_NETWORK_FABRIC_KEEPALIVE_INTVL },
 		{ "keepalive-probes",				CASE_NETWORK_FABRIC_KEEPALIVE_PROBES },
+		{ "latency-max-ms",					CASE_NETWORK_FABRIC_LATENCY_MAX_MS },
 		{ "}",								CASE_CONTEXT_END }
 };
 
@@ -1392,6 +1399,8 @@ cfg_strdup_one_of(const cfg_line* p_line, const char* toks[], int num_toks)
 	}
 
 	char valid_toks[valid_toks_size];
+
+	valid_toks[0] = 0;
 
 	for (int i = 0; i < num_toks; i++) {
 		strcat(valid_toks, toks[i]);
@@ -1952,6 +1961,12 @@ as_config_init(const char *config_file)
 			case CASE_SERVICE_BATCH_INDEX_THREADS:
 				c->n_batch_index_threads = cfg_int(&line, 1, MAX_BATCH_THREADS);
 				break;
+			case CASE_SERVICE_CLOCK_SKEW_MAX_MS:
+				c->clock_skew_max_ms = cfg_u32_no_checks(&line);
+				break;
+			case CASE_SERVICE_CLUSTER_ID:
+				cfg_strcpy(&line, c->cluster_id, AS_CLUSTER_ID_SZ);
+				break;
 			case CASE_SERVICE_ENABLE_BENCHMARKS_SVC:
 				c->svc_benchmarks_enabled = cfg_bool(&line);
 				break;
@@ -2026,17 +2041,8 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_PAXOS_RECOVERY_POLICY:
 				switch(cfg_find_tok(line.val_tok_1, SERVICE_PAXOS_RECOVERY_OPTS, NUM_SERVICE_PAXOS_RECOVERY_OPTS)) {
-				case CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_ALL:
-					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_ALL;
-					break;
-				case CASE_SERVICE_PAXOS_RECOVERY_AUTO_DUN_MASTER:
-					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_DUN_MASTER;
-					break;
 				case CASE_SERVICE_PAXOS_RECOVERY_AUTO_RESET_MASTER:
 					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_AUTO_RESET_MASTER;
-					break;
-				case CASE_SERVICE_PAXOS_RECOVERY_MANUAL:
-					c->paxos_recovery_policy = AS_PAXOS_RECOVERY_POLICY_MANUAL;
 					break;
 				case CASE_NOT_FOUND:
 				default:
@@ -2118,9 +2124,6 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_SERVICE_SINDEX_DATA_MAX_MEMORY:
 				c->sindex_data_max_memory = cfg_u64_no_checks(&line);
-				break;
-			case CASE_SERVICE_SNUB_NODES:
-				c->snub_nodes = cfg_bool(&line);
 				break;
 			case CASE_SERVICE_TICKER_INTERVAL:
 				c->ticker_interval = cfg_u32_no_checks(&line);
@@ -2364,10 +2367,10 @@ as_config_init(const char *config_file)
 			case CASE_NETWORK_HEARTBEAT_MODE:
 				switch(cfg_find_tok(line.val_tok_1, NETWORK_HEARTBEAT_MODE_OPTS, NUM_NETWORK_HEARTBEAT_MODE_OPTS)) {
 				case CASE_NETWORK_HEARTBEAT_MODE_MULTICAST:
-					c->hb_mode = AS_HB_MODE_MCAST;
+					c->hb_config.hb_mode = AS_HB_MODE_MCAST;
 					break;
 				case CASE_NETWORK_HEARTBEAT_MODE_MESH:
-					c->hb_mode = AS_HB_MODE_MESH;
+					c->hb_config.hb_mode = AS_HB_MODE_MESH;
 					break;
 				case CASE_NOT_FOUND:
 				default:
@@ -2376,45 +2379,45 @@ as_config_init(const char *config_file)
 				}
 				break;
 			case CASE_NETWORK_HEARTBEAT_ADDRESS:
-				c->hb_addr = cfg_set_addr(line.val_tok_1);
+				cfg_strcpy(&line, c->hb_config.hb_listen_addr_s, sizeof(c->hb_config.hb_listen_addr_s));
 				break;
 			case CASE_NETWORK_HEARTBEAT_PORT:
-				c->hb_port = cfg_int_no_checks(&line);
-				break;
-			case CASE_NETWORK_HEARTBEAT_MESH_ADDRESS:
-				c->hb_init_addr = cfg_strdup_no_checks(&line);
-				break;
-			case CASE_NETWORK_HEARTBEAT_MESH_PORT:
-				c->hb_init_port = cfg_port(&line);
+				c->hb_config.hb_listen_port = cfg_port(&line);
 				break;
 			case CASE_NETWORK_HEARTBEAT_MESH_SEED_ADDRESS_PORT:
 				cfg_add_mesh_seed_addr_port(cfg_strdup_no_checks(&line), cfg_port_val2(&line));
 				break;
 			case CASE_NETWORK_HEARTBEAT_INTERVAL:
-				c->hb_interval = cfg_u32_no_checks(&line);
+				c->hb_config.hb_tx_interval = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NETWORK_HEARTBEAT_TIMEOUT:
-				c->hb_timeout = cfg_u32_no_checks(&line);
+				c->hb_config.hb_max_intervals_missed = cfg_u32_no_checks(&line);
 				break;
+			case CASE_NETWORK_HEARTBEAT_FABRIC_GRACE_FACTOR:
+				c->hb_config.hb_fabric_grace_factor = cfg_int_no_checks(&line);
+		 		break;
 			case CASE_NETWORK_HEARTBEAT_INTERFACE_ADDRESS:
-				c->hb_tx_addr = cfg_strdup_no_checks(&line);
+				cfg_strcpy(&line, c->hb_config.hb_bind_interface_addr_s, sizeof(c->hb_config.hb_bind_interface_addr_s));
 				break;
 			case CASE_NETWORK_HEARTBEAT_MCAST_TTL:
-				c->hb_mcast_ttl = cfg_u8_no_checks(&line);
+				c->hb_config.hb_mcast_ttl = cfg_u8_no_checks(&line);
 				break;
 			case CASE_NETWORK_HEARTBEAT_MESH_RW_RETRY_TIMEOUT:
-				c->hb_mesh_rw_retry_timeout = cfg_u32_no_checks(&line);
+				c->hb_config.hb_mesh_rw_retry_timeout = cfg_u32_no_checks(&line);
+				break;
+			case CASE_NETWORK_HEARTBEAT_MTU:
+				c->hb_config.override_mtu = cfg_u32_no_checks(&line);
 				break;
 			case CASE_NETWORK_HEARTBEAT_PROTOCOL:
 				switch(cfg_find_tok(line.val_tok_1, NETWORK_HEARTBEAT_PROTOCOL_OPTS, NUM_NETWORK_HEARTBEAT_PROTOCOL_OPTS)) {
 				case CASE_NETWORK_HEARTBEAT_PROTOCOL_RESET:
-					c->hb_protocol = AS_HB_PROTOCOL_RESET;
+					c->hb_config.hb_protocol = AS_HB_PROTOCOL_RESET;
 					break;
 				case CASE_NETWORK_HEARTBEAT_PROTOCOL_V1:
-					c->hb_protocol = AS_HB_PROTOCOL_V1;
+					c->hb_config.hb_protocol = AS_HB_PROTOCOL_V1;
 					break;
 				case CASE_NETWORK_HEARTBEAT_PROTOCOL_V2:
-					c->hb_protocol = AS_HB_PROTOCOL_V2;
+					c->hb_config.hb_protocol = AS_HB_PROTOCOL_V2;
 					break;
 				case CASE_NOT_FOUND:
 				default:
@@ -2423,9 +2426,6 @@ as_config_init(const char *config_file)
 				}
 				break;
 			case CASE_CONTEXT_END:
-				if (c->hb_init_addr && c->hb_mesh_seed_addrs[0]) {
-					cf_crash_nostack(AS_CFG, "can't use both mesh-address and mesh-seed-address-port");
-				}
 				cfg_end_context(&state);
 				break;
 			case CASE_NOT_FOUND:
@@ -2457,6 +2457,9 @@ as_config_init(const char *config_file)
 				break;
 			case CASE_NETWORK_FABRIC_KEEPALIVE_PROBES:
 				c->fabric_keepalive_probes = cfg_int_no_checks(&line);
+				break;
+			case CASE_NETWORK_FABRIC_LATENCY_MAX_MS:
+				c->fabric_latency_max_ms = cfg_int(&line, 0, 1000);
 				break;
 			case CASE_CONTEXT_END:
 				cfg_end_context(&state);
@@ -3359,25 +3362,36 @@ as_config_post_process(as_config *c, const char *config_file)
 
 	if (g_config.external_address && ! g_config.is_external_address_virtual) {
 		// Check if external address matches any address in service list.
-		uint8_t buf[512];
-		cf_ifaddr *ifaddr;
-		int	ifaddr_sz;
-		cf_ifaddr_get(&ifaddr, &ifaddr_sz, buf, sizeof(buf));
+		uint8_t buffer[1000];
+		cf_ip_addr *addrs;
+		int32_t n_addrs;
 
-		cf_dyn_buf_define(temp_service_db);
-		build_service_list(ifaddr, ifaddr_sz, &temp_service_db);
-
-		char *service_str = cf_dyn_buf_strdup(&temp_service_db);
-
-		if (! (service_str && strstr(service_str, g_config.external_address))) {
-			cf_crash_nostack(AS_CFG, "external address '%s' does not match service addresses '%s'",
-					g_config.external_address,
-					service_str ? service_str : "null");
+		if (cf_inter_get_addr_ex(&addrs, &n_addrs, buffer, sizeof(buffer)) < 0) {
+			cf_crash(AS_CFG, "Error while getting interface addresses");
 		}
 
-		cf_dyn_buf_free(&temp_service_db);
-		cf_free(service_str);
+		cf_dyn_buf_define(services);
+		build_service_list(addrs, n_addrs, &services);
+
+		char *string = cf_dyn_buf_strdup(&services);
+
+		if (string == NULL || strstr(string, g_config.external_address) == NULL) {
+			cf_crash_nostack(AS_CFG, "external address '%s' does not match service addresses '%s'",
+					g_config.external_address,
+					string != NULL ? string : "null");
+		}
+
+		cf_dyn_buf_free(&services);
+		cf_free(string);
 	}
+
+	// "none" is a special value representing an empty cluster-id.
+	if (strncmp(g_config.cluster_id, "none", AS_CLUSTER_ID_SZ) == 0) {
+		memset(g_config.cluster_id, 0, sizeof(g_config.cluster_id));
+	}
+
+	// Validate heartbeat configuration.
+	as_hb_config_validate();
 
 	//--------------------------------------------
 	// Per-namespace config post-processing.
@@ -3489,6 +3503,35 @@ as_config_post_process(as_config *c, const char *config_file)
 
 
 //==========================================================
+// Public API - get/set (dynamic) members.
+//
+
+pthread_mutex_t g_config_lock = PTHREAD_MUTEX_INITIALIZER;
+
+void
+as_config_cluster_id_get(char* cluster_id)
+{
+	pthread_mutex_lock(&g_config_lock);
+	strcpy(cluster_id, g_config.cluster_id);
+	pthread_mutex_unlock(&g_config_lock);
+}
+
+bool
+as_config_cluster_id_set(const char* cluster_id)
+{
+	if (strlen(cluster_id) >= AS_CLUSTER_ID_SZ) {
+		return false;
+	}
+
+	pthread_mutex_lock(&g_config_lock);
+	strcpy(g_config.cluster_id, cluster_id);
+	pthread_mutex_unlock(&g_config_lock);
+
+	return true;
+}
+
+
+//==========================================================
 // Item-specific parsing utilities.
 //
 
@@ -3498,9 +3541,9 @@ cfg_add_mesh_seed_addr_port(char* addr, int port)
 	int i;
 
 	for (i = 0; i < AS_CLUSTER_SZ; i++) {
-		if (g_config.hb_mesh_seed_addrs[i] == NULL) {
-			g_config.hb_mesh_seed_addrs[i] = addr;
-			g_config.hb_mesh_seed_ports[i] = port;
+		if (g_config.hb_config.hb_mesh_seed_addrs[i] == NULL) {
+			g_config.hb_config.hb_mesh_seed_addrs[i] = addr;
+			g_config.hb_config.hb_mesh_seed_ports[i] = port;
 			break;
 		}
 	}
@@ -3722,18 +3765,9 @@ cfg_set_addr(const char* name)
 void
 cfg_use_hardware_values(as_config* c)
 {
-	// Use this array if interface name is configured in config file.
-	const char *config_interface_names[] = { 0, 0 };
-
 	if (c->self_node == 0) {
-		const char **interface_names = NULL;
-		if (c->network_interface_name) {
-			// Use network interface name provided in the configuration.
-			config_interface_names[0] = c->network_interface_name;
-			interface_names = config_interface_names;
-		}
-		if (0 > (cf_nodeid_get(c->fabric_port, &(c->self_node), &(c->node_ip), c->hb_mode, &(c->hb_addr), interface_names))) {
-			cf_crash_nostack(AS_CFG, "could not get unique id and/or ip address");
+		if (cf_node_id_get(c->fabric_port, c->network_interface_name, &c->self_node, &c->node_ip) < 0) {
+			cf_crash_nostack(AS_CFG, "Could not get node ID and/or IP address");
 		}
 	}
 }

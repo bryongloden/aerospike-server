@@ -57,6 +57,8 @@ extern int as_info_set_tree(char *name, as_info_get_tree_fn gv_fn);
 // For commands - you will be called with the parameters.
 extern int as_info_set_command(char *name, as_info_command_fn command_fn, as_sec_perm required_perm);
 
+int as_info_parameter_get(char *param_str, char *param, char *value, int *value_len);
+
 extern void as_info_paxos_event(as_paxos_generation gen,
 		as_paxos_change *change, cf_node succession[], void *udata);
 
@@ -80,7 +82,7 @@ extern int as_info_init();
 // The info port is used by more basic monitoring services.
 extern int as_info_port_start();
 
-extern void build_service_list(cf_ifaddr *ifaddr, int ifaddr_sz, cf_dyn_buf *db);
+extern void build_service_list(cf_ip_addr *addrs, int32_t n_addrs, cf_dyn_buf *db);
 
 // Needed by ticker:
 

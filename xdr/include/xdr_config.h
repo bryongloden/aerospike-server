@@ -37,7 +37,6 @@
 #define CLUSTER_MAX_SZ		128
 #define NAMESPACE_MAX_SZ	32
 #define NAMESPACE_MAX_NUM	32
-#define XDR_MAX_DGLOG_FILES 1
 
 /* Configuration parser switch() case identifiers. The server (cfg.c) needs to
  * see these. The server configuration parser and the XDR configuration parser
@@ -160,11 +159,10 @@ typedef struct xdr_config {
 	bool	xdr_global_enabled;
 
 	// Ring buffer configuration
-	char 	*xdr_digestlog_path[XDR_MAX_DGLOG_FILES];
-	uint64_t xdr_digestlog_file_size[XDR_MAX_DGLOG_FILES];
+	char 	*xdr_digestlog_path;
+	uint64_t xdr_digestlog_file_size;
 	bool 	xdr_digestlog_overwrite;
 	bool	xdr_digestlog_persist;
-	uint8_t xdr_num_digestlog_paths;
 
 	int	xdr_info_port;
 	int	xdr_max_ship_throughput;

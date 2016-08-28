@@ -94,7 +94,7 @@ void as_rw_init();
 
 uint32_t rw_request_hash_count();
 transaction_status rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw, as_transaction* tr);
-void rw_request_hash_delete(rw_request_hkey* hkey);
+void rw_request_hash_delete(rw_request_hkey* hkey, rw_request* rw);
 rw_request* rw_request_hash_get(rw_request_hkey* hkey);
 
 void rw_request_hash_dump();

@@ -21,9 +21,6 @@
  */
 
 #include <sys/time.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>

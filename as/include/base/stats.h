@@ -30,6 +30,8 @@
 
 #include "citrusleaf/cf_atomic.h"
 
+#include "hist.h"
+
 
 //==========================================================
 // Typedefs.

@@ -58,21 +58,6 @@
 #define AS_FABRIC_PRIORITY_LOW		(CF_QUEUE_PRIORITY_LOW)		// migrate data
 
 
-// Register for fabric notifications
-typedef enum {
-	FABRIC_NODE_ARRIVE,		// new node came online
-	FABRIC_NODE_DEPART,		// node departed
-	FABRIC_NODE_UNDUN,		// node un-dunned
-	FABRIC_NODE_DUN,		// node dunned
-	FABRIC_RESET		    // reset the universe of nodes
-} as_fabric_event_type;
-
-typedef struct as_fabric_event_node_t {
-	as_fabric_event_type evt;
-	cf_node nodeid;         // the node which has arrived or departed
-	cf_node p_node; 		// principle node in the succession list, only on arrival?
-} as_fabric_event_node;
-
 #define FABRIC_ALL_NODES (0xFFFFFFFFFFFFFFFF)
 
 // Log information about existing "msg" objects and queues.
@@ -95,17 +80,6 @@ extern void as_fabric_msg_put(msg *);
 extern int as_fabric_get_node_lasttime(cf_node node, uint64_t *lasttime);
 
 //
-// Register for global events ARRIVE and DEPARTED
-//
-// FABRIC_NODE_ARRIVE - the corresponding nodeid will be set to the node that has joined, and you can send it messages
-//
-// FABRIC_NODE_DEPART - the corresponding nodeid will be set to the departed node, you can no longer send it messages
-// The events are batched in an array of as_fabric_event_node elements
-//
-
-typedef int (*as_fabric_event_fn) (int nevents, as_fabric_event_node *events, void *udata);
-
-//
 // Register for message arrival from the fabric
 //
 // This is a message corresponding to the message you described in the init
@@ -122,19 +96,9 @@ typedef int (*as_fabric_msg_fn) (cf_node id, msg *m, void *udata);
 extern int as_fabric_init();
 
 //
-// Register for events, such as node arrive and node depart
-// at the moment, there will only be one registered handlers - a second writer
-// will kick out the previous - but there's no real reason for that other than sloth
-// maybe someday we'll have more messages to register for? I hope not, those would
-// become messages
-
-extern int as_fabric_register_event_fn(as_fabric_event_fn event_cb, void *udata_event );
-
-//
 // Register for incoming message types. All messages of this type will be handed to this
 // one handler. Right now there is only one handlers - but it's really cheap to have multiple
 // handlers, if we wanted, because of the reference counting system.
-
 extern int as_fabric_register_msg_fn(msg_type type, const msg_template *mt, size_t mt_sz, size_t scratch_sz, as_fabric_msg_fn msg_cb, void *udata_msg);
 
 // Call this once your register functions are all done and ready (or ready enough)
@@ -226,4 +190,3 @@ as_fabric_get_node_list(as_node_list *nl)
 
 	return(nl->sz);
 }
-

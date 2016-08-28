@@ -61,7 +61,7 @@ static int64_t g_max_msgs_per_type = -1;
 // Forward declarations.
 //
 
-static size_t msg_get_wire_field_size(const msg_field *mf);
+static size_t msg_get_wire_field_size(const msg_field_type type, size_t field_len);
 static uint32_t msg_stamp_field(uint8_t *buf, const msg_field *mf);
 static void msg_field_save(msg *m, msg_field *mf);
 static msg_str_array *msg_str_array_create(int n_strs, int total_len);
@@ -219,8 +219,24 @@ msg_get_wire_size(const msg *m)
 		const msg_field *mf = &m->f[i];
 
 		if (mf->is_valid && mf->is_set) {
-			sz += msg_get_wire_field_size(mf);
+			sz += msg_get_wire_field_size(mf->type, mf->field_len);
 		}
+	}
+
+	return sz;
+}
+
+// Get the fixed wire size of input templates.
+// mt - pointer to the templates.
+// mt_len - number of templates.
+int
+msg_get_template_fixed_sz(const msg_template* mt, const size_t mt_len)
+{
+	// Include fixed header size.
+	uint32_t sz = 6;
+
+	for (int i = 0; i < mt_len; i++) {
+			sz += msg_get_wire_field_size(mt[i].type, 0);
 	}
 
 	return sz;
@@ -230,15 +246,8 @@ msg_get_wire_size(const msg *m)
 int
 msg_fillbuf(const msg *m, uint8_t *buf, size_t *buflen)
 {
-	uint32_t sz = 6;
-
-	for (uint32_t i = 0; i < m->n_fields; i++) {
-		const msg_field *mf = &m->f[i];
-
-		if (mf->is_valid && mf->is_set) {
-			sz += msg_get_wire_field_size(mf);
-		}
-	}
+	// Figure out the size
+	uint32_t sz = msg_get_wire_size(m);
 
 	if (sz > *buflen) {
 		*buflen = sz; // tell the caller how much you're really going to need
@@ -934,6 +943,14 @@ msg_get_buf(const msg *m, int field_id, uint8_t **r, size_t *len,
 	return 0;
 }
 
+bool
+msg_is_set(const msg* m, int field_id)
+{
+	if (field_id >= m->n_fields) {
+		return false;
+	}
+	return m->f[field_id].is_valid && m->f[field_id].is_set;
+}
 
 int
 msg_get_uint32_array(msg *m, int field_id, int index, uint32_t *r)
@@ -1164,9 +1181,9 @@ msg_dump(const msg *m, const char *info)
 //
 
 static size_t
-msg_get_wire_field_size(const msg_field *mf)
+msg_get_wire_field_size(const msg_field_type type, size_t field_len)
 {
-	switch (mf->type) {
+	switch (type) {
 	case M_FT_INT32:
 	case M_FT_UINT32:
 		return 4 + 7;
@@ -1179,9 +1196,9 @@ msg_get_wire_field_size(const msg_field *mf)
 	case M_FT_ARRAY_UINT64:
 	case M_FT_ARRAY_STR:
 	case M_FT_ARRAY_BUF:
-		return mf->field_len + 7;
+		return field_len + 7;
 	default:
-		cf_crash(CF_MSG, "unexpected field type %d", mf->type);
+		cf_crash(CF_MSG, "unexpected field type %d", type);
 		break;
 	}
 

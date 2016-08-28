@@ -765,7 +765,6 @@ emigrate_tree_reduce_fn(as_index_ref *r_ref, void *udata)
 
 	if (! should_emigrate_record(emig, r_ref)) {
 		as_record_done(r_ref, ns);
-		cf_atomic_int_incr(&ns->migrate_records_skipped);
 		return;
 	}
 

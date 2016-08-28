@@ -45,15 +45,12 @@
 #include "fault.h"
 
 #include "base/cfg.h"
+#include "base/thr_info.h"
 #include "base/system_metadata.h"
 #include <sys/stat.h>
 
 char udf_smd_module_name[] = "UDF";
-
 char *as_udf_type_name[] = {"LUA", 0};
-
-// TODO - promote to thr_info.h.
-extern int as_info_parameter_get(char *param_str, char *param, char *value, int  *value_len);
 
 static int file_read(char *, uint8_t **, size_t *, unsigned char *);
 static int file_write(char *, uint8_t *, size_t, unsigned char *);
@@ -152,7 +149,8 @@ static int file_write(char * filename, uint8_t * content, size_t content_len, un
 	}
 	int r = fwrite(content, sizeof(char), content_len, file);
 	if (r <= 0) {
-		cf_info(AS_UDF, "could not write file %s %d", filepath, r);
+		cf_warning(AS_UDF, "could not write file %s: %d", filepath, r);
+		fclose(file);
 		return -1;
 	}
 

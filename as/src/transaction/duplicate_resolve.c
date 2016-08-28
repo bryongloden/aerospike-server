@@ -379,7 +379,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 		rw->dup_res_complete = true;
 
 		pthread_mutex_unlock(&rw->lock);
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		rw_request_release(rw);
 		as_fabric_msg_put(m);
 		return;
@@ -453,7 +453,7 @@ dup_res_handle_ack(cf_node node, msg* m)
 	pthread_mutex_unlock(&rw->lock);
 
 	if (delete_from_hash) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 	}
 
 	rw_request_release(rw);
@@ -619,7 +619,6 @@ get_ldt_info(const msg* m, as_record_merge_component* c)
 	uint32_t info;
 
 	if (msg_get_uint32(m, RW_FIELD_INFO, &info) != 0) {
-		cf_warning(AS_LDT, "dup-res ack: no info");
 		return;
 	}
 

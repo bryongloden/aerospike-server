@@ -1669,7 +1669,7 @@ as_partition_immigrate_start(as_namespace *ns, as_partition_id pid,
 			}
 
 			if (! dupl_node_found) {
-				cf_detail(AS_PARTITION, "{%s:%d} immigrate_start aborted - sync master receiving migrate from node not in duplicate list",
+				cf_warning(AS_PARTITION, "{%s:%d} immigrate_start aborted - sync master receiving migrate from node not in duplicate list",
 						ns->name, pid);
 				rv = AS_MIGRATE_FAIL;
 				break;
@@ -2106,8 +2106,6 @@ as_partition_balance()
 
 	for (int i = 0; i < g_config.paxos_max_cluster_size; i++) {
 		if (succession[i] == (cf_node)0) {
-			cluster_size = i;
-
 			// Make sure that rest of succession list is empty.
 			for (int j = i; j < g_config.paxos_max_cluster_size; j++) {
 				if (succession[j] != (cf_node)0) {
@@ -2116,6 +2114,8 @@ as_partition_balance()
 			}
 
 			break;
+		} else {
+			cluster_size++;
 		}
 	}
 

@@ -287,9 +287,6 @@ bool as_paxos_get_cluster_integrity(as_paxos *p);
 // Set the Paxos cluster integrity state.
 void as_paxos_set_cluster_integrity(as_paxos *p, bool state);
 
-// Set whether automatic dunning of all nodes in other clusters should persist.
-void as_paxos_dun_hold(bool is_dunned);
-
 /* Paxos Info. command functions. */
 
 /*
@@ -304,10 +301,3 @@ void as_paxos_dump(bool verbose);
  * Returns 0 if successful, -1 otherwise.
  */
 int as_paxos_get_succession_list(cf_dyn_buf *db);
-
-/*
- * Set the Paxos succession list from list of node IDs.
- * The first element of the list will become the Paxos principal.
- * Returns 0 if successful, -1 otherwise.
- */
-int as_paxos_set_succession_list(/*const*/ char *nodes_str, int nodes_str_len);

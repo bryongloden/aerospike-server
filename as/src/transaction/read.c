@@ -157,7 +157,7 @@ as_read_start(as_transaction* tr)
 	// else - rw_request is now in hash, continue...
 
 	if (! start_read_dup_res(rw, tr, send_metadata)) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		send_read_response(tr, NULL, NULL, 0, NULL, NULL);
 		return TRANS_DONE_ERROR;
@@ -223,6 +223,9 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		return;
 	}
 
+	// Note - if tr was setup from rw, rw->from.any has been set null and
+	// informs timeout it lost the race.
+
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		BENCHMARK_NEXT_DATA_POINT(tr, read, local);
@@ -265,7 +268,7 @@ send_read_response(as_transaction* tr, as_msg_op** ops, as_bin** response_bins,
 		break;
 	}
 
-	tr->from.any = NULL; // inform timeout it lost the race
+	tr->from.any = NULL; // pattern, not needed
 }
 
 
@@ -299,8 +302,7 @@ read_timeout_cb(rw_request* rw)
 		break;
 	}
 
-	// Paranoia - shouldn't need this to inform other callback it lost race.
-	rw->from.any = NULL;
+	rw->from.any = NULL; // inform other callback it lost the race
 }
 
 
@@ -419,14 +421,18 @@ read_local(as_transaction* tr, bool stop_if_not_found)
 					}
 
 					if (as_bin_inuse(rb)) {
-						b = rb;
 						n_result_bins++;
+						ops[n_bins] = op;
+						response_bins[n_bins++] = rb;
+					}
+					else if (respond_all_ops) {
+						ops[n_bins] = op;
+						response_bins[n_bins++] = NULL;
 					}
 				}
-
-				if (b || respond_all_ops) {
+				else if (respond_all_ops) {
 					ops[n_bins] = op;
-					response_bins[n_bins++] = b;
+					response_bins[n_bins++] = NULL;
 				}
 			}
 			else {

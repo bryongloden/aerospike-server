@@ -549,7 +549,6 @@ extern void as_record_allocate_key(as_record* r, const uint8_t* key, uint32_t ke
 extern void as_record_remove_key(as_record* r);
 extern int as_record_resolve_conflict(conflict_resolution_pol policy, uint16_t left_gen, uint64_t left_lut, uint32_t left_vt, uint16_t right_gen, uint64_t right_lut, uint32_t right_vt);
 extern int as_record_pickle(as_record *r, as_storage_rd *rd, uint8_t **buf_r, size_t *len_r);
-extern int as_record_pickle_a_delete(byte **buf_r, size_t *len_r);
 extern uint32_t as_record_buf_get_stack_particles_sz(uint8_t *buf);
 extern int as_record_unpickle_replace(as_record *r, as_storage_rd *rd, uint8_t *buf, size_t bufsz, uint8_t **stack_particles, bool has_sindex);
 extern void as_record_apply_properties(as_record *r, as_namespace *ns, const as_rec_props *p_rec_props);
@@ -613,10 +612,6 @@ typedef struct {
 
 extern int as_record_flatten(as_partition_reservation *rsv, cf_digest *keyd,
 		uint16_t n_components, as_record_merge_component *components, int *winner_idx);
-
-// this function can be called with only one component, the one to replace the record
-extern int as_record_replace(as_partition_reservation *rsv, cf_digest *keyd,
-		uint16_t n_components, as_record_merge_component *components);
 
 // a simpler call that gives seconds in the right epoch
 #define as_record_void_time_get() cf_clepoch_seconds()
@@ -1288,6 +1283,10 @@ struct as_namespace_s {
 	cf_atomic64		n_fail_key_busy;
 	cf_atomic64		n_fail_generation;
 	cf_atomic64		n_fail_record_too_big;
+
+	// Special non-error counters:
+
+	cf_atomic64		n_deleted_last_bin;
 
 	// LDT stats.
 

@@ -121,7 +121,8 @@ as_delete_start(as_transaction* tr)
 	}
 	// else - rw_request is now in hash, continue...
 
-	if (g_config.write_duplicate_resolution_disable) {
+	if (g_config.write_duplicate_resolution_disable ||
+			as_transaction_is_nsup_delete(tr)) {
 		// Note - preventing duplicate resolution this way allows
 		// rw_request_destroy() to handle dup_msg[] cleanup correctly.
 		tr->rsv.n_dupl = 0;
@@ -129,9 +130,9 @@ as_delete_start(as_transaction* tr)
 
 	// If there are duplicates to resolve, start doing so.
 	// TODO - should we bother if there's no generation check?
-	if (tr->rsv.n_dupl != 0 && ! as_transaction_is_nsup_delete(tr)) {
+	if (tr->rsv.n_dupl != 0) {
 		if (! start_delete_dup_res(rw, tr)) {
-			rw_request_hash_delete(&hkey);
+			rw_request_hash_delete(&hkey, rw);
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 			send_delete_response(tr);
 			return TRANS_DONE_ERROR;
@@ -144,7 +145,7 @@ as_delete_start(as_transaction* tr)
 
 	// If error, transaction is finished.
 	if ((status = delete_master(tr)) != TRANS_IN_PROGRESS) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		send_delete_response(tr);
 		return status;
 	}
@@ -156,13 +157,13 @@ as_delete_start(as_transaction* tr)
 	// If we don't need replica writes, transaction is finished.
 	// TODO - consider a single-node fast path bypassing hash?
 	if (rw->n_dest_nodes == 0) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		send_delete_response(tr);
 		return TRANS_DONE_SUCCESS;
 	}
 
 	if (! start_delete_repl_write(rw, tr)) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		send_delete_response(tr);
 		return TRANS_DONE_ERROR;
@@ -211,8 +212,8 @@ start_delete_repl_write(rw_request* rw, as_transaction* tr)
 	rw->respond_client_on_master_completion = respond_on_master_complete(tr);
 
 	if (rw->respond_client_on_master_completion) {
-		// Don't wait for replication. When replication is complete, we will
-		// call send_write_response() again, but it will no-op quietly.
+		// Don't wait for replication. When replication is complete, we won't
+		// call send_delete_response() again.
 		send_delete_response(tr);
 	}
 
@@ -272,8 +273,8 @@ delete_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 	}
 
 	if (rw->respond_client_on_master_completion) {
-		// Don't wait for replication. When replication is complete, we will
-		// call send_delete_response() again, but it will no-op quietly.
+		// Don't wait for replication. When replication is complete, we won't
+		// call send_delete_response() again.
 		send_delete_response(tr);
 	}
 
@@ -309,6 +310,9 @@ send_delete_response(as_transaction* tr)
 		return;
 	}
 
+	// Note - if tr was setup from rw, rw->from.any has been set null and
+	// informs timeout it lost the race.
+
 	switch (tr->origin) {
 	case FROM_CLIENT:
 		as_msg_send_reply(tr->from.proto_fd_h, tr->result_code, tr->generation,
@@ -331,7 +335,7 @@ send_delete_response(as_transaction* tr)
 		break;
 	}
 
-	tr->from.any = NULL; // inform timeout it lost the race
+	tr->from.any = NULL; // needed only for respond-on-master-complete
 }
 
 
@@ -359,8 +363,7 @@ delete_timeout_cb(rw_request* rw)
 		break;
 	}
 
-	// Paranoia - shouldn't need this to inform other callback it lost race.
-	rw->from.any = NULL;
+	rw->from.any = NULL; // inform other callback it lost the race
 }
 
 

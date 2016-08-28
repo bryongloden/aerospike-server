@@ -37,6 +37,7 @@
 #include "citrusleaf/cf_digest.h"
 
 #include "fault.h"
+#include "socket.h"
 
 #include "base/batch.h"
 #include "base/datamodel.h"
@@ -449,9 +450,9 @@ as_release_file_handle(as_file_handle *proto_fd_h)
 		return;
 	}
 
-	close(proto_fd_h->fd);
+	cf_socket_close(proto_fd_h->sock);
 	proto_fd_h->fh_info &= ~FH_INFO_DONOT_REAP;
-	proto_fd_h->fd = -1;
+	proto_fd_h->sock = NULL;
 
 	if (proto_fd_h->proto)	{
 		as_proto *p = proto_fd_h->proto;
@@ -480,7 +481,7 @@ as_end_of_transaction(as_file_handle *proto_fd_h, bool force_close)
 	thr_demarshal_resume(proto_fd_h);
 
 	if (force_close) {
-		shutdown(proto_fd_h->fd, SHUT_RDWR);
+		cf_socket_shutdown(proto_fd_h->sock);
 	}
 
 	as_release_file_handle(proto_fd_h);

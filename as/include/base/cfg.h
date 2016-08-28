@@ -42,6 +42,8 @@
 
 #include "base/cluster_config.h"
 #include "base/security_config.h"
+#include "fabric/hb.h"
+#include "fabric/hlc.h"
 
 
 //==========================================================
@@ -55,8 +57,8 @@ struct as_namespace_s;
 // Typedefs and constants.
 //
 
-#define AS_CLUSTER_SZ 128
 #define AS_NAMESPACE_SZ 32
+#define AS_CLUSTER_ID_SZ 65
 
 #define MAX_DEMARSHAL_THREADS 256
 #define MAX_FABRIC_WORKERS 128
@@ -99,6 +101,8 @@ typedef struct as_config_s {
 	uint32_t		batch_max_unused_buffers; // maximum number of buffers allowed in buffer pool at any one time
 	uint32_t		batch_priority; // number of records between an enforced context switch, used by old batch only
 	int				n_batch_index_threads;
+	int				clock_skew_max_ms; // maximum allowed skew between this node's physical clock and the physical component of its hybrid clock
+	char			cluster_id[AS_CLUSTER_ID_SZ];
 	PAD_BOOL		svc_benchmarks_enabled;
 	PAD_BOOL		info_hist_enabled;
 	int				n_fabric_workers;
@@ -115,7 +119,7 @@ typedef struct as_config_s {
 	uint32_t		nsup_delete_sleep; // sleep this many microseconds between generating delete transactions, default 0
 	uint32_t		nsup_period;
 	PAD_BOOL		nsup_startup_evict;
-	uint64_t		paxos_max_cluster_size;
+	uint32_t		paxos_max_cluster_size;
 	paxos_protocol_enum paxos_protocol;
 	paxos_recovery_policy_enum paxos_recovery_policy;
 	uint32_t		paxos_retransmit_period;
@@ -147,7 +151,6 @@ typedef struct as_config_s {
 	uint32_t		sindex_builder_threads; // secondary index builder thread pool size
 	uint64_t		sindex_data_max_memory; // maximum memory for secondary index trees
 	PAD_BOOL		sindex_gc_enable_histogram; // dynamic only
-	PAD_BOOL		snub_nodes;
 	uint32_t		ticker_interval;
 	uint64_t		transaction_max_ns;
 	uint32_t		transaction_pending_limit; // 0 means no limit
@@ -177,7 +180,7 @@ typedef struct as_config_s {
 
 	// Normally hidden:
 
-	char*			external_address; // host name that clients will connect on
+	const char*			external_address; // host name that clients will connect on
 	PAD_BOOL		is_external_address_virtual;
 	char*			alternate_address; // alternate service address (could be DNS)
 	char*			network_interface_name; // network_interface_name to use on this machine for generating the IP addresses
@@ -187,24 +190,7 @@ typedef struct as_config_s {
 	// network::heartbeat context.
 	//
 
-	// Normally visible, in canonical configuration file order:
-
-	hb_mode_enum	hb_mode;
-	char*			hb_addr;
-	int				hb_port;
-	char* 			hb_init_addr;
-	int				hb_init_port;
-	char*			hb_mesh_seed_addrs[AS_CLUSTER_SZ];
-	int				hb_mesh_seed_ports[AS_CLUSTER_SZ];
-	uint32_t		hb_interval;
-	uint32_t		hb_timeout;
-
-	// Normally hidden:
-
-	char*			hb_tx_addr;
-	uint8_t			hb_mcast_ttl;
-	uint32_t		hb_mesh_rw_retry_timeout;
-	hb_protocol_enum hb_protocol;
+	as_hb_config	hb_config;
 
 	//--------------------------------------------
 	// network::fabric context.
@@ -220,6 +206,7 @@ typedef struct as_config_s {
 	int				fabric_keepalive_time;
 	int				fabric_keepalive_intvl;
 	int				fabric_keepalive_probes;
+	int				fabric_latency_max_ms; // time window for ordering
 
 	//--------------------------------------------
 	// network::info context.
@@ -230,7 +217,7 @@ typedef struct as_config_s {
 	int				info_port;
 
 	//--------------------------------------------
-	// Configuration sub-containers.
+	// Remaining configuration top-level contexts.
 	//
 
 	mod_lua_config	mod_lua;
@@ -242,18 +229,6 @@ typedef struct as_config_s {
 	// Not (directly) configuration. Many should probably be
 	// relocated...
 	//
-
-	// Address advertised for receiving [mesh only] heartbeats: computed
-	// starting with "heartbeat.address" (g_config.hb_addr), and set to a real
-	// IP address (g_config.node_ip) if that is "any", and finally overriden by
-	// "heartbeat.interface-address" (g_config.hb_tx_addr), if set.
-	char*			hb_addr_to_use;
-
-	// heartbeat: takes the lock and fills in this structure
-	// paxos: read only uses it for detecting changes
-	cf_node			hb_paxos_succ_list_index[AS_CLUSTER_SZ];
-	cf_node			hb_paxos_succ_list[AS_CLUSTER_SZ][AS_CLUSTER_SZ];
-	pthread_mutex_t	hb_paxos_lock;
 
 	// Cluster-config related.
 	cf_node			self_node; // unique instance ID either HW inspired or cluster group/node ID
@@ -286,6 +261,9 @@ typedef struct as_config_s {
 
 as_config* as_config_init(const char* config_file);
 void as_config_post_process(as_config* c, const char* config_file);
+
+void as_config_cluster_id_get(char* cluster_id);
+bool as_config_cluster_id_set(const char* cluster_id);
 
 extern as_config g_config;
 extern xdr_config g_xcfg;

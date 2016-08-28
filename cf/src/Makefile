@@ -16,8 +16,11 @@ HEADERS += vmapx.h
 SOURCES += alloc.c arenax.c cf_str.c daemon.c dynbuf.c fault.c
 SOURCES += hist.c hist_track.c id.c linear_hist.c meminfo.c msg.c olock.c
 SOURCES += socket.c vmapx.c
-ifneq ($(USE_WARM),1)
+ifneq ($(USE_EE),1)
   SOURCES += arenax_ce.c
+endif
+ifneq ($(USE_IPV6),1)
+  SOURCES += socket_ce.c
 endif
 
 ifeq ($(USE_JEM),1)

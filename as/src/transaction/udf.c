@@ -295,7 +295,7 @@ as_udf_start(as_transaction* tr)
 	// If there are duplicates to resolve, start doing so.
 	if (tr->rsv.n_dupl != 0) {
 		if (! start_udf_dup_res(rw, tr)) {
-			rw_request_hash_delete(&hkey);
+			rw_request_hash_delete(&hkey, rw);
 			tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 			send_udf_response(tr, NULL);
 			return TRANS_DONE_ERROR;
@@ -314,7 +314,7 @@ as_udf_start(as_transaction* tr)
 	// If error or UDF was a read, transaction is finished.
 	if (status != TRANS_IN_PROGRESS) {
 		send_udf_response(tr, &rw->response_db);
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		return status;
 	}
 
@@ -326,12 +326,12 @@ as_udf_start(as_transaction* tr)
 	// TODO - consider a single-node fast path bypassing hash and pickling?
 	if (rw->n_dest_nodes == 0) {
 		send_udf_response(tr, &rw->response_db);
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		return TRANS_DONE_SUCCESS;
 	}
 
 	if (! start_udf_repl_write(rw, tr)) {
-		rw_request_hash_delete(&hkey);
+		rw_request_hash_delete(&hkey, rw);
 		tr->result_code = AS_PROTO_RESULT_FAIL_UNKNOWN;
 		send_udf_response(tr, NULL);
 		return TRANS_DONE_ERROR;
@@ -407,8 +407,8 @@ start_udf_repl_write(rw_request* rw, as_transaction* tr)
 	rw->respond_client_on_master_completion = respond_on_master_complete(tr);
 
 	if (rw->respond_client_on_master_completion) {
-		// Don't wait for replication. When replication is complete, we will
-		// call send_udf_response() again, but it will no-op quietly.
+		// Don't wait for replication. When replication is complete, we won't
+		// call send_udf_response() again.
 		send_udf_response(tr, &rw->response_db);
 	}
 
@@ -474,8 +474,8 @@ udf_repl_write_after_dup_res(rw_request* rw, as_transaction* tr)
 	}
 
 	if (rw->respond_client_on_master_completion) {
-		// Don't wait for replication. When replication is complete, we will
-		// call send_udf_response() again, but it will no-op quietly.
+		// Don't wait for replication. When replication is complete, we won't
+		// call send_udf_response() again.
 		send_udf_response(tr, &rw->response_db);
 	}
 
@@ -513,6 +513,9 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 		cf_warning(AS_RW, "transaction origin %u has null 'from'", tr->origin);
 		return;
 	}
+
+	// Note - if tr was setup from rw, rw->from.any has been set null and
+	// informs timeout it lost the race.
 
 	switch (tr->origin) {
 	case FROM_CLIENT:
@@ -555,7 +558,7 @@ send_udf_response(as_transaction* tr, cf_dyn_buf* db)
 		break;
 	}
 
-	tr->from.any = NULL; // inform timeout it lost the race
+	tr->from.any = NULL; // needed only for respond-on-master-complete
 }
 
 
@@ -588,8 +591,7 @@ udf_timeout_cb(rw_request* rw)
 		break;
 	}
 
-	// Paranoia - shouldn't need this to inform other callback it lost race.
-	rw->from.any = NULL;
+	rw->from.any = NULL; // inform other callback it lost the race
 }
 
 
@@ -1012,11 +1014,13 @@ udf_post_processing(udf_record* urecord, udf_optype* urecord_op,
 	}
 
 	if (udf_zero_bins_left(urecord)) {
+		// Note - record delete via aerospike:remove() does not get here.
 		// Not applicable to sub-records unless requested by UDF - orphaned sub-
 		// records are eventually overwritten by defrag.
 		as_index_delete(tr->rsv.tree, &tr->keyd);
-		urecord->starting_memory_bytes = 0;
 		*urecord_op = UDF_OPTYPE_DELETE;
+		as_storage_record_adjust_mem_stats(rd, urecord->starting_memory_bytes);
+		cf_atomic64_incr(&tr->rsv.ns->n_deleted_last_bin);
 	}
 	else if (*urecord_op == UDF_OPTYPE_WRITE) {
 		size_t rec_props_data_size = as_storage_record_rec_props_size(rd);

@@ -230,7 +230,7 @@ log_line_system_memory()
 void
 log_line_in_progress()
 {
-	cf_info(AS_INFO, "   in-progress: tsvc-q %d info-q %d nsup-delete-q  %d rw-hash %u proxy-hash %u rec-refs %lu",
+	cf_info(AS_INFO, "   in-progress: tsvc-q %d info-q %d nsup-delete-q %d rw-hash %u proxy-hash %u rec-refs %lu",
 			thr_tsvc_queue_get_size(),
 			as_info_queue_get_size(),
 			as_nsup_queue_get_size(),

@@ -31,7 +31,7 @@ endif
 
 DEB = $(PKG)/packages/aerospike-server-$(EDITION)-$(REV).$(OS).x86_64.deb
 
-ifeq ($(USE_XDR),1)
+ifeq ($(USE_EE),1)
 all:	dist-xdr package clean
 else
 all:	dist package clean
@@ -88,7 +88,14 @@ else
 endif
 
 	install -d $(OPT_AS)/doc
-	install -pm 644 $(DEPTH)/LICENSE $(OPT_AS)/doc
+ifeq ($(EDITION),community)
+	install -pm 644 $(DEPTH)/LICENSE.CE $(OPT_AS)/doc/LICENSE
+	install -pm 644 $(DEPTH)/LICENSE-AGPL $(OPT_AS)/doc
+	install -pm 644 $(DEPTH)/LICENSE-APACHE $(OPT_AS)/doc
+else
+	install -pm 644 $(EEREPO)/LICENSE.EE $(OPT_AS)/doc/LICENSE
+endif
+	cat $(DEPTH)/LICENSE.3rdParty >> $(OPT_AS)/doc/LICENSE
 
 ifeq ($(EDITION),community)
   ifeq ($(USE_SYSTEMD),1)
@@ -139,6 +146,6 @@ ifeq ($(USE_SYSTEMD),1)
 	rm -rf $(PKG)/deb/aerospike.service
 endif
 
-ifeq ($(USE_XDR),1)
+ifeq ($(USE_EE),1)
   include $(XDR)/make_in/Makefile.deb.in
 endif

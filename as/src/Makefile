@@ -40,19 +40,15 @@ BASE_SOURCES += thr_batch.c thr_demarshal.c thr_info.c thr_info_port.c thr_nsup.
 BASE_SOURCES += thr_query.c thr_sindex.c thr_tsvc.c ticker.c transaction.c
 BASE_SOURCES += udf_aerospike.c udf_arglist.c udf_cask.c
 BASE_SOURCES += udf_memtracker.c udf_record.c udf_timer.c
-ifneq ($(USE_XDR),1)
+ifneq ($(USE_EE),1)
+  BASE_SOURCES += namespace_ce.c
+  BASE_SOURCES += security_ce.c
   BASE_SOURCES += xdr_serverside_stubs.c
 endif
-ifneq ($(USE_WARM),1)
-  BASE_SOURCES += namespace_ce.c
-endif
-ifneq ($(USE_SEC),1)
-  BASE_SOURCES += security_ce.c
-endif
 
-FABRIC_HEADERS += hb.h fabric.h migrate.h paxos.h
-FABRIC_SOURCES += hb.c fabric.c migrate.c partition.c paxos.c
-ifneq ($(USE_WARM),1)
+FABRIC_HEADERS += hb.h hlc.h fabric.h migrate.h paxos.h
+FABRIC_SOURCES += hb.c hlc.c fabric.c migrate.c partition.c paxos.c
+ifneq ($(USE_EE),1)
   FABRIC_SOURCES += migrate_ce.c
 endif
 
@@ -61,7 +57,7 @@ GEOSPATIAL_SOURCES += geospatial.cc geojson.cc
 
 STORAGE_HEADERS += storage.h drv_ssd.h
 STORAGE_SOURCES += storage.c drv_kv.c drv_memory.c drv_ssd.c
-ifneq ($(USE_WARM),1)
+ifneq ($(USE_EE),1)
   STORAGE_SOURCES += drv_ssd_ce.c
 endif
 

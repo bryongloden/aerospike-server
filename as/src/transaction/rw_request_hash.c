@@ -186,9 +186,9 @@ rw_request_hash_insert(rw_request_hkey* hkey, rw_request* rw,
 
 
 void
-rw_request_hash_delete(rw_request_hkey* hkey)
+rw_request_hash_delete(rw_request_hkey* hkey, rw_request* rw)
 {
-	rchash_delete(g_rw_request_hash, hkey, sizeof(*hkey));
+	rchash_delete_object(g_rw_request_hash, hkey, sizeof(*hkey), rw);
 }
 
 

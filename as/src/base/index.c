@@ -767,14 +767,14 @@ void
 as_index_reduce_traverse(as_index_tree *tree, cf_arenax_handle r_h,
 		cf_arenax_handle sentinel_h, as_index_ph_array *v_a)
 {
-	if (v_a->pos >= v_a->alloc_sz) {
-		return;
-	}
-
 	as_index *r = RESOLVE_H(r_h);
 
 	if (r->left_h != sentinel_h) {
 		as_index_reduce_traverse(tree, r->left_h, sentinel_h, v_a);
+	}
+
+	if (v_a->pos >= v_a->alloc_sz) {
+		return;
 	}
 
 	as_index_reserve(r);

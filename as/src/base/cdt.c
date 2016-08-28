@@ -167,8 +167,12 @@ calc_index_count_multi(int64_t in_index, uint64_t in_count, uint32_t ele_count, 
 		*out_count = 0;
 	}
 	else if ((in_index = calc_index(in_index, (int)ele_count)) < 0) {
-		if (in_index + in_count > 0) {
+		if ((uint64_t)(-in_index) < in_count) {
 			*out_count = in_count + in_index;
+
+			if (*out_count > ele_count) {
+				*out_count = ele_count;
+			}
 		}
 		else {
 			*out_count = 0;

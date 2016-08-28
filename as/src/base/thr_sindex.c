@@ -239,6 +239,7 @@ as_sindex__set_delete_fn(void *param)
 	as_sindex_delete_set(si_set->ns, si_set->set->name);
 	cf_debug(AS_SINDEX, "Time taken to clear sindexes on dropping set %s %ld ms", si_set->set->name, (cf_getus() - s_time) / 1000);
 	SET_DELETED_OFF(si_set->set);
+	cf_info(AS_SINDEX, "changing set-delete to false for deleted set %s in ns %s", si_set->set->name, si_set->ns->name);
 	cf_free(si_set);
 	return NULL;
 }
@@ -255,7 +256,7 @@ as_sindex_initiate_set_delete(as_namespace * ns, as_set * set)
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 	pthread_t sindex_set_delete_th;
 	if (0 != pthread_create(&sindex_set_delete_th, &attr, as_sindex__set_delete_fn, (void*)si_set)) {
-		cf_warning(AS_SINDEX, "could not create sindex set-destroy thread");
+		cf_warning(AS_SINDEX, "could not create sindex set-destroy thread, changing set-delete to false for ns %s set %s", si_set->ns->name, si_set->set->name);
 		SET_DELETED_OFF(si_set->set);
 		cf_free(si_set);
 	}

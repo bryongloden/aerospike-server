@@ -34,6 +34,7 @@
 #include "citrusleaf/cf_digest.h"
 
 #include "msg.h"
+#include "socket.h"
 #include "util.h"
 
 #include "base/cfg.h"
@@ -94,8 +95,8 @@
 typedef struct as_file_handle_s {
 	char		client[64];		// client identifier (currently ip-addr:port)
 	uint64_t	last_used;		// last ms we read or wrote
-	int			fd;
-	int			epoll_fd;		// the file descriptor of our epoll instance
+	cf_socket	*sock;			// our socket
+	cf_poll		poll;			// our epoll instance
 	bool		reap_me;		// tells the reaper to come and get us
 	bool		trans_active;	// a transaction is running on this connection
 	uint32_t	fh_info;		// bitmap containing status info of this file handle

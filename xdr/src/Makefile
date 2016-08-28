@@ -4,7 +4,7 @@
 DEPTH = ../..
 include $(DEPTH)/make_in/Makefile.in
 
-ifeq ($(USE_XDR),1)
+ifeq ($(USE_EE),1)
   include $(XDR)/make_in/Makefile.vars
 endif
 
@@ -33,7 +33,7 @@ PREPROS = $(XDR_ALL_OBJECTS:%=%$(PREPRO_SUFFIX))
 CFLAGS := $(CFLAGS:-fno-common=)
 
 .PHONY: all
-ifeq ($(USE_XDR),1)
+ifeq ($(USE_EE),1)
   ifeq ($(EEREPO), )
     $(error "To build with XDR support, the EEREPO environment variable must be set appropriately.")
   endif
@@ -55,7 +55,7 @@ ifneq ($(PREPRO),1)
   endif
 endif
 
-ifeq ($(USE_XDR),1)
+ifeq ($(USE_EE),1)
   include $(XDR)/make_in/Makefile.targets
 endif
 
